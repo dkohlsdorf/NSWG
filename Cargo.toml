@@ -1,0 +1,8 @@
+[package]
+name = "nswg"
+version = "0.1.0"
+authors = ["Daniel Kohlsdorf <daniel.kohlsdorf@xing.com>"]
+edition = "2018"
+
+[dependencies]
+rand = "*"
