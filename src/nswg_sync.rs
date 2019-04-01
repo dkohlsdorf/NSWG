@@ -24,9 +24,64 @@ impl NavigableSmallWorldGraphChunk {
     }
 
     pub fn n_instances(&self) -> usize {
-        self.instances.len() / self.dim
+        self.instances.len()
     }
     
+    fn distance(&self, query: &[f32], node: usize, align_band: Option<usize>) -> f32 {
+        match align_band {
+            Some(w) => self.dtw(query, node, w),
+            None    => self.euclidean(query, node)
+        }
+    }
+
+    fn euclidean(&self, query: &[f32], node: usize) -> f32 {
+        let y = &self.instances[&node];
+        let mut distance = 0.0;
+        for i in 0 .. query.len() {
+            distance += f32::powf(query[i] - y[i], 2.0);
+        }
+        f32::sqrt(distance)
+    }
+
+    fn dtw(&self, query: &[f32], node: usize, w: usize) -> f32 {
+        let y = &self.instances[&node];
+        let n  = query.len();
+        let m  = y.len();
+        // allocating here is the main bottleneck
+        let mut dp = vec![std::f32::INFINITY; (n + 1) * (m + 1)]; 
+        dp[0] = 0.0;
+        for i in 1 .. n + 1 {
+            for j in usize::max(NavigableSmallWorldGraphChunk::sub(i, w), 1) .. usize::min(i + w, m + 1) {
+                let distance = f32::powf(query[i - 1] - y[j - 1], 2.0);                
+                dp[i * (n + 1) + j] = distance + NavigableSmallWorldGraphChunk::min3(
+                    dp[(i - 1) * (n + 1) + j],
+                    dp[i       * (n + 1) + (j - 1)], 
+                    dp[(i - 1) * (n + 1) + (j - 1)]
+                )
+            }
+        }
+        dp[dp.len() - 1]
+    }
+    
+    fn sub(x: usize, y: usize) -> usize{
+        if x > y {
+            x - y
+        } else {
+            0
+        }
+    }
+
+    fn min3(x: f32, y: f32, z: f32) -> f32 {
+        let mut min = x;
+        if y < min {
+            min = y;
+        }
+        if z < min {
+            min = z;
+        }
+        min
+    }
+
 }
 
 pub struct SynchronizedNavigableSmallWorldGraph {
@@ -55,26 +110,15 @@ impl SynchronizedNavigableSmallWorldGraph {
         node % self.chunks.len()
     }
 
-    fn euclidean(&self, query: &[f32], node: usize) -> f32 {
-        let chunk_id = self.chunk_id(node);
-        let chunk = self.chunks[chunk_id].lock().unwrap();
-        let y = &chunk.instances[&node];
-        let mut distance = 0.0;
-        for i in 0 .. query.len() {
-            distance += f32::powf(query[i] - y[i], 2.0);
-        }
-        f32::sqrt(distance)
-    }
-
     /// Insert a vector into the graph, the nearest neihbors to the vector become the edges.
     /// * `id` vector id
     /// * `query` the vector
     /// * `n_searches` number of search restarts
     /// * `k_neighbors` number of search results, here number of edges
     /// * `align_band` Sakoe Chiba Band for Dynamic Time Warping, if not set we use Euclidean Distance
-    pub fn insert(&mut self, id: usize, query: &[f32], n_searches: usize, k_neighbors: usize) {
+    pub fn insert(&mut self, id: usize, query: &[f32], n_searches: usize, k_neighbors: usize, align_band: Option<usize>) {
         if self.n_instances() > k_neighbors {
-            let knn: Vec<usize> = self.search(&query[..], n_searches, k_neighbors).0
+            let knn: Vec<usize> = self.search(&query[..], n_searches, k_neighbors, align_band).0
                 .iter()
                 .map(|result| result.node)
                 .collect();
@@ -116,7 +160,7 @@ impl SynchronizedNavigableSmallWorldGraph {
     /// * `n_searches` number of restarts
     /// * `k_neighbors` number of results
     /// * `align_band` Sakoe Chiba Band for Dynamic Time Warping, if not set we use Euclidean Distance
-    pub fn search(&self, query: &[f32], n_searches: usize, k_neighbors: usize) -> (Vec<SearchResult>, usize){
+    pub fn search(&self, query: &[f32], n_searches: usize, k_neighbors: usize, align_band: Option<usize>) -> (Vec<SearchResult>, usize){
         let mut candidates = ResultStore::new();
         let mut results    = ResultStore::new();
         let mut visited    = HashSet::new();
@@ -134,7 +178,7 @@ impl SynchronizedNavigableSmallWorldGraph {
             while visited.contains(&entry_point) {
                 entry_point = rng.gen_range(0, self.n_instances());
             }
-            let distance    = self.euclidean(query, entry_point);         
+            let distance = self.chunks[self.chunk_id(entry_point)].lock().unwrap().distance(query, entry_point, align_band);         
             candidates.insert(SearchResult::new(entry_point, distance));
             while candidates.len() > 0 {
                 // check if we can stop: abendon search if the result is the worst than the top k so far
@@ -151,9 +195,17 @@ impl SynchronizedNavigableSmallWorldGraph {
                     if !visited.contains(&edge) {
                         n_steps += 1;
                         visited.insert(edge);
-                        let distance = self.euclidean(query, edge);                                                                        
-                        candidates.insert(SearchResult::new(edge, distance));
-                        bsf.insert(SearchResult::new(edge, distance));                    
+                        let edge_id = self.chunk_id(edge);
+                        if chunk_id == edge_id {
+                            let distance = chunk.distance(query, edge, align_band);                                                                        
+                            candidates.insert(SearchResult::new(edge, distance));
+                            bsf.insert(SearchResult::new(edge, distance));       
+                        } else {
+                            let edge_chunk = self.chunks[edge_id].lock().unwrap();
+                            let distance = edge_chunk.distance(query, edge, align_band);                                                                        
+                            candidates.insert(SearchResult::new(edge, distance));
+                            bsf.insert(SearchResult::new(edge, distance));       
+                        }             
                     }
                 }
             }           
