@@ -63,12 +63,10 @@ impl NavigableSmallWorldGraph {
         let mut n_steps    = 0;     
         for _attempt in 0 .. n_searches {
             let mut bsf     = ResultStore::new();
-            
             // stop if we visited all of the nodes
             if self.n_instances() == visited.len() {
                 break;
             }
-
             // sample entry point, make sure we never used it before
             // and insert the point as a candidate
             let mut entry_point = rng.gen_range(0, self.n_instances());
@@ -77,7 +75,6 @@ impl NavigableSmallWorldGraph {
             }
             let distance    = self.distance(query, entry_point, align_band);         
             candidates.insert(SearchResult::new(entry_point, distance));
-
             while candidates.len() > 0 {
                 // check if we can stop: abendon search if the result is the worst than the top k so far
                 let candidate = candidates.best(1);
