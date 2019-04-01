@@ -23,10 +23,10 @@ pub fn knn(neighbors: Vec<usize>, labels: usize) -> usize {
 fn main() {
     println!("Navigable Small World Graphs");
     let (train, max_labels, dim) = ucr_ts::UCRInstance::from_file(String::from(
-        "UCR_TS_Archive_2015/ShapesAll/ShapesAll_TRAIN",
+        "PATH TO TRAIN"
     ));
     let (test, _, _) = ucr_ts::UCRInstance::from_file(String::from(
-        "UCR_TS_Archive_2015/ShapesAll/ShapesAll_TEST",
+        "PATH TO TEST",
     ));
     let mut nswg = nswg::NavigableSmallWorldGraph::new(dim);
     let now = Instant::now();
